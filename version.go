@@ -1,4 +1,4 @@
 package csvpb
 
 // Version is the version of the csvpb package.
-const Version = "pre-alpha"
+const Version = "0.1.0"
