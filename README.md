@@ -12,7 +12,6 @@ CSVPB is a library for writing [structpb](https://pkg.go.dev/google.golang.org/p
 * [Installation](#installation)
 * [Usage](#usage)
 * [Contributing](#contributing)
-* [Resources](#resources)
 
 ## Installation
 
