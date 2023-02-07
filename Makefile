@@ -20,8 +20,9 @@ lint:
 	golangci-lint run --fix;
 	golangci-lint run --config .golangci.yml;
 
-# test runs all of the unit tests locally. Each test is run 5 times to minimize flakiness.
+# test runs all of the unit tests locally. Each test is run 5 times to minimize
+# flakiness.
 .PHONY: tests
 tests:
 	$(GC) clean -testcache
-	go test -v -count=5 ./...
+	go test -v -count=100 ./...
