@@ -5,7 +5,7 @@ declare -a EXCLUDE_LIST=()
 
 # LICENSE_TEMPLATE is the license notice to prepend to files.
 LICENSE_TEMPLATE=$(cat <<EOF
-// Copyright 2022 The GCSV Authors.
+// Copyright 2022 The CSVPB Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.

@@ -1,4 +1,4 @@
-module github.com/alpstable/gcsv
+module github.com/alpstable/csvpb
 
 go 1.19
 
