@@ -10,6 +10,7 @@ package csvpb
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -20,16 +21,38 @@ import (
 var ErrUnsupportedValueType = fmt.Errorf("unsupported value type")
 
 type column struct {
+	parent *column
 	header string
 	order  int
 	data   []string
+	rowNum int
+}
+
+// root is the root of the column tree, the oldest ancestor.
+func (col *column) root() *column {
+	if col.parent == nil {
+		return col
+	}
+
+	return col.parent.root()
+}
+
+func (col *column) currentRowNum() int {
+	return col.root().rowNum
+}
+
+func (col *column) updateRowNum() {
+	col.root().rowNum++
+}
+
+func (col *column) addData(data string) {
+	col.data[col.currentRowNum()] = data
 }
 
 type columns struct {
-	m           map[string]*column
-	alphabetize bool
-	buf         int
-	currentPos  int
+	m             map[string]*column
+	buf           int
+	currentColNum int
 }
 
 type columnsOpt func(*columns)
@@ -42,12 +65,6 @@ func newColumns(opts ...columnsOpt) *columns {
 	}
 
 	return cols
-}
-
-func withAlphabetize(alphabetize bool) columnsOpt {
-	return func(cols *columns) {
-		cols.alphabetize = alphabetize
-	}
 }
 
 func withBuf(buf int) columnsOpt {
@@ -79,38 +96,57 @@ func (cols *columns) reorderAlphabetically() {
 	}
 }
 
-func (cols *columns) addColumn(header string) {
+func (cols *columns) addChildColumn(parent *column, header string) {
 	if _, ok := cols.m[header]; ok {
 		return
 	}
 
 	cols.m[header] = &column{
+		parent: parent,
 		header: header,
-		order:  len(cols.m),
-		data:   make([]string, cols.buf),
-	}
-
-	if cols.alphabetize {
-		cols.reorderAlphabetically()
 	}
 }
 
-func (cols *columns) addData(header string, data string) {
+func (cols *columns) addColumn(header string) {
+	cols.addChildColumn(nil, header)
+}
+
+func (cols *columns) addChildData(parent *column, key string, data string) {
 	// If the column doesn't exist, then we need to create it.
-	if _, ok := cols.m[header]; !ok {
-		cols.addColumn(header)
+	if _, ok := cols.m[key]; !ok {
+		cols.addChildColumn(parent, key)
 	}
 
-	cols.m[header].data[cols.currentPos] = data
+	// If the data is empty update it to be the size of the buffer.
+	if len(cols.m[key].data) == 0 {
+		cols.m[key].data = make([]string, cols.buf)
+		cols.m[key].order = cols.currentColNum
+		cols.currentColNum++
+	}
+
+	cols.m[key].addData(data)
+}
+
+func (cols *columns) addData(key string, data string) {
+	cols.addChildData(nil, key, data)
+}
+
+// trimParents will trim the parent data from the columns.
+func (cols *columns) trimParents() {
+	for _, column := range cols.m {
+		if len(column.data) == 0 {
+			delete(cols.m, column.header)
+		}
+	}
 }
 
 func (cols *columns) addStruct(key string, obj *structpb.Struct) error {
-	// If the key is not empty, then that means that we are in a nested
-	// object. To deal with this case, we create a new columns map buffered
-	// with only one row and process the values for that map and object.
 	focus := cols
 	if key != "" {
-		focus = newColumns(withBuf(1), withAlphabetize(cols.alphabetize))
+		// If the key is not empty, then that means that we are in a
+		// nested object. To deal with this case, we create a new object
+		// and add it to the columns.
+		focus = newColumns(withBuf(rowBufferForStruct(obj)))
 	}
 
 	for fieldName, fieldValue := range obj.GetFields() {
@@ -121,18 +157,28 @@ func (cols *columns) addStruct(key string, obj *structpb.Struct) error {
 	}
 
 	if focus != cols {
-		for _, subColumn := range focus.m {
-			newFieldName := fmt.Sprintf("%s.%s", key, subColumn.header)
-			cols.addData(newFieldName, subColumn.data[0])
-		}
-	}
+		// Add the parent column to the columns.
+		cols.addColumn(key)
 
-	focus.currentPos++
+		for _, subColumn := range focus.m {
+			// If the subColumn has no data, then do nothing.
+			if len(subColumn.data) == 0 {
+				continue
+			}
+
+			newFieldName := fmt.Sprintf("%s.%s", key, subColumn.header)
+
+			parent := cols.m[key]
+			cols.addChildData(parent, newFieldName, subColumn.data[0])
+		}
+
+		cols.m[key].updateRowNum()
+	}
 
 	return nil
 }
 
-func (cols *columns) addList(key string, list *structpb.ListValue) {
+func (cols *columns) addList(key string, list *structpb.ListValue) error {
 	var buf strings.Builder
 
 	buf.WriteString("[")
@@ -148,6 +194,18 @@ func (cols *columns) addList(key string, list *structpb.ListValue) {
 			buf.WriteString(fmt.Sprintf("%t", valType.BoolValue))
 		case *structpb.Value_NullValue:
 			buf.WriteString("")
+		case *structpb.Value_StructValue:
+			// add anew object.
+			err := cols.addStruct(key, valType.StructValue)
+			if err != nil {
+				return fmt.Errorf("failed to add list value: %w", err)
+			}
+
+			// In the struct case, we need to exclude the key
+			// from being added to the list.
+			continue
+		default:
+			return fmt.Errorf("%w: %T", ErrUnsupportedValueType, valType)
 		}
 
 		if i != len(list.GetValues())-1 {
@@ -157,8 +215,13 @@ func (cols *columns) addList(key string, list *structpb.ListValue) {
 
 	buf.WriteString("]")
 
-	// Join the values with a comma.
-	cols.addData(key, buf.String())
+	// If the buffer is greater than two (i.e. []), then we need to add
+	// the data to the column.
+	if buf.Len() > 2 {
+		cols.addData(key, buf.String())
+	}
+
+	return nil
 }
 
 func (cols *columns) addValue(key string, value *structpb.Value) error {
@@ -174,7 +237,7 @@ func (cols *columns) addValue(key string, value *structpb.Value) error {
 	case *structpb.Value_StructValue:
 		return cols.addStruct(key, valType.StructValue)
 	case *structpb.Value_ListValue:
-		cols.addList(key, valType.ListValue)
+		return cols.addList(key, valType.ListValue)
 	default:
 		return fmt.Errorf("%w: %T", ErrUnsupportedValueType, valType)
 	}
@@ -218,18 +281,59 @@ func WithAlphabetizeHeaders() ListWriterOption {
 	}
 }
 
+// rowBufferForStruct will recursively iterate over all fields and count the number
+// of columns in every nested struct.
+func rowBufferForStruct(obj *structpb.Struct) int {
+	var buf int
+
+	for _, value := range obj.GetFields() {
+		switch valType := value.Kind.(type) {
+		case *structpb.Value_ListValue:
+			buf += rowBufferForList(valType.ListValue)
+		}
+	}
+
+	return int(math.Max(float64(buf), 1))
+}
+
+// rowBufferForList will return the number of rows that should be creatd for the given
+// structpb.Listvalue.
+func rowBufferForList(list *structpb.ListValue) int {
+	var buf int
+
+	// Recursive call this function to get the number of unique columns
+	// accross ALL objects in the list.
+	for _, value := range list.GetValues() {
+		switch value.Kind.(type) {
+		case *structpb.Value_StructValue:
+			buf += rowBufferForStruct(value.GetStructValue())
+		}
+	}
+
+	return buf
+}
+
 // Write writes the ListValue to CSV.
 func (w *ListWriter) Write(ctx context.Context, list *structpb.ListValue) error {
+	rowCount := rowBufferForList(list)
+
 	// columns is a map of column headers to the column data.
-	columns := newColumns(
-		withBuf(len(list.GetValues())),
-		withAlphabetize(w.alphabetizeHeaders))
+	columns := newColumns(withBuf(rowCount))
 
 	for _, value := range list.Values {
 		err := columns.addValue("", value)
 		if err != nil {
 			return fmt.Errorf("failed to add value: %w", err)
 		}
+	}
+
+	// Remove all nodes that do not contain data to write. These include
+	// parent rows for data organization.
+	columns.trimParents()
+
+	// Reorder the columns to be in alphabetical order.
+	if w.alphabetizeHeaders {
+		columns.reorderAlphabetically()
 	}
 
 	// Put the data in form of a slice of slices, where the first slice is
@@ -247,11 +351,12 @@ func (w *ListWriter) Write(ctx context.Context, list *structpb.ListValue) error 
 		return fmt.Errorf("failed to write csv header: %w", err)
 	}
 
-	for i := 0; i < columns.currentPos; i++ {
+	for i := 0; i < rowCount; i++ {
 		row := make([]string, len(columns.m))
 
 		for _, column := range columns.m {
 			column := column
+
 			row[column.order] = column.data[i]
 		}
 
