@@ -178,8 +178,11 @@ func (cols *columns) addStruct(key string, obj *structpb.Struct) error {
 	return nil
 }
 
+//nolint:cyclop
 func (cols *columns) addList(key string, list *structpb.ListValue) error {
 	var buf strings.Builder
+
+	const minBufLen = 3
 
 	buf.WriteString("[")
 
@@ -195,7 +198,6 @@ func (cols *columns) addList(key string, list *structpb.ListValue) error {
 		case *structpb.Value_NullValue:
 			buf.WriteString("")
 		case *structpb.Value_StructValue:
-			// add anew object.
 			err := cols.addStruct(key, valType.StructValue)
 			if err != nil {
 				return fmt.Errorf("failed to add list value: %w", err)
@@ -217,7 +219,7 @@ func (cols *columns) addList(key string, list *structpb.ListValue) error {
 
 	// If the buffer is greater than two (i.e. []), then we need to add
 	// the data to the column.
-	if buf.Len() > 2 {
+	if buf.Len() >= minBufLen {
 		cols.addData(key, buf.String())
 	}
 
@@ -287,10 +289,17 @@ func rowBufferForStruct(obj *structpb.Struct) int {
 	var buf int
 
 	for _, value := range obj.GetFields() {
-		switch valType := value.Kind.(type) {
-		case *structpb.Value_ListValue:
-			buf += rowBufferForList(valType.ListValue)
+		valType := value.Kind
+		if _, ok := valType.(*structpb.Value_ListValue); !ok {
+			continue
 		}
+
+		list, ok := valType.(*structpb.Value_ListValue)
+		if !ok {
+			continue
+		}
+
+		buf += rowBufferForList(list.ListValue)
 	}
 
 	return int(math.Max(float64(buf), 1))
@@ -302,12 +311,19 @@ func rowBufferForList(list *structpb.ListValue) int {
 	var buf int
 
 	// Recursive call this function to get the number of unique columns
-	// accross ALL objects in the list.
+	// across ALL objects in the list.
 	for _, value := range list.GetValues() {
-		switch value.Kind.(type) {
-		case *structpb.Value_StructValue:
-			buf += rowBufferForStruct(value.GetStructValue())
+		valType := value.Kind
+		if _, ok := valType.(*structpb.Value_StructValue); !ok {
+			continue
 		}
+
+		obj, ok := valType.(*structpb.Value_StructValue)
+		if !ok {
+			continue
+		}
+
+		buf += rowBufferForStruct(obj.StructValue)
 	}
 
 	return buf
