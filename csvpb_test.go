@@ -18,7 +18,7 @@ import (
 func TestColumns(t *testing.T) {
 	t.Parallel()
 
-	t.Run("add object", func(t *testing.T) {
+	t.Run("add value", func(t *testing.T) {
 		t.Parallel()
 
 		for _, tcase := range []struct {
@@ -143,6 +143,69 @@ func TestColumns(t *testing.T) {
 					},
 				},
 			},
+			{
+				name: "object with array values of objects",
+				data: []byte(`{"foo": [{"bar": "baz"}, {"bar": "qux"}], "quux": "quuz", "corge": "grault"}`),
+				want: map[string]*column{
+					"foo.bar": {
+						header: "foo.bar",
+						order:  0,
+						data:   []string{"baz", "qux"},
+					},
+					"quux": {
+						header: "quux",
+						order:  1,
+						data:   []string{"quuz", ""},
+					},
+					"corge": {
+						header: "corge",
+						order:  2,
+						data:   []string{"grault", ""},
+					},
+				},
+			},
+			{
+				name: "object with subobject",
+				data: []byte(`{"id": 1, "name": "test", "age": {"foo": "bar"}}`),
+				want: map[string]*column{
+					"id": {
+						header: "id",
+						order:  0,
+						data:   []string{"1.000000"},
+					},
+					"name": {
+						header: "name",
+						order:  1,
+						data:   []string{"test"},
+					},
+					"age.foo": {
+						header: "age.foo",
+						order:  2,
+						data:   []string{"bar"},
+					},
+				},
+			},
+			{
+				name: "one json record with nested object",
+				data: []byte(`{"id": 1, "name": "test", "age": {"foo": {"bar": "baz"}}}`),
+				want: map[string]*column{
+					"id": {
+						header: "id",
+						order:  0,
+						data:   []string{"1.000000"},
+					},
+					"name": {
+						header: "name",
+						order:  1,
+						data:   []string{"test"},
+					},
+					"age.foo.bar": {
+						header: "age.foo.bar",
+						order:  2,
+						data:   []string{"baz"},
+					},
+				},
+			},
 		} {
 			tcase := tcase
 
@@ -155,7 +218,9 @@ func TestColumns(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				cols := newColumns(withBuf(len(list.Values)))
+				cols := newColumns(withBuf(rowBufferForList(list)))
+
+				t.Logf("buffer size: %d\n", cols.buf)
 
 				for _, value := range list.GetValues() {
 					if err := cols.addValue("", value); err != nil {
@@ -163,10 +228,12 @@ func TestColumns(t *testing.T) {
 					}
 				}
 
+				cols.trimParents()
+
 				for _, got := range cols.m {
 					want, ok := tcase.want[got.header]
 					if !ok {
-						t.Logf("got: %+v with len=%d", got, len(got.data))
+						t.Logf("got: %+v for header %q with len=%d", got, got.header, len(got.data))
 						t.Logf("want: %+v", want)
 
 						t.Fatalf("unexpected column: %s", got.header)
@@ -302,6 +369,72 @@ func TestWrite(t *testing.T) {
 				t.Logf("want: %+v", tcase.want)
 
 				t.Fatal("unexpected rows")
+			}
+		})
+	}
+}
+
+func TestRowBufferForList(t *testing.T) {
+	t.Parallel()
+
+	for _, tcase := range []struct {
+		name       string
+		data       []byte
+		decodeType DecodeType
+		want       int
+	}{
+		{
+			"d0=1 d1=1",
+			[]byte(`{"x": [{"y": [{"z": 1}]}]}`),
+			DecodeTypeJSON,
+			1,
+		},
+		{
+			"d0=1 d1=2",
+			[]byte(`{"x": [{"": [{"z": 1}, {"z": 2}]}]}`),
+			DecodeTypeJSON,
+			2,
+		},
+		{
+			"d0=2 d1=1",
+			[]byte(`{"x": [{"y": [{"z": 1}]}, {"y": [{"z": 2}]}]}`),
+			DecodeTypeJSON,
+			2,
+		},
+		{
+			"d0=2 d1=3",
+			[]byte(`{"x": [{"y": [{"z": 1}, {"z": 2}, {"z": 3}]}, {"y": [{"z": 4}, {"z": 5}, {"z": 6}]}]}`),
+			DecodeTypeJSON,
+			6,
+		},
+		{
+			"d0=0 with many objects",
+			[]byte(`{"x": {"y": "x"}, "b": {"z": "a"}}`),
+			DecodeTypeJSON,
+			1,
+		},
+		{
+			"d0=1",
+			[]byte(`[{"x": {"y": 1}}, {"x": {"z": 1}}]`),
+			DecodeTypeJSON,
+			2,
+		},
+	} {
+		tcase := tcase
+
+		t.Run(tcase.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Turn data into a list.
+			list, err := Decode(DecodeTypeJSON, tcase.data)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got := rowBufferForList(list)
+
+			if got != tcase.want {
+				t.Fatalf("got %d, want %d", got, tcase.want)
 			}
 		})
 	}
