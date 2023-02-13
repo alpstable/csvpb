@@ -7,12 +7,6 @@
 
 CSVPB is a library for writing [structpb](https://pkg.go.dev/google.golang.org/protobuf/types/known/structpb#ListValue)-typed data to CSV.
 
-##
-
-* [Installation](#installation)
-* [Usage](#usage)
-* [Contributing](#contributing)
-
 ## Installation
 
 ```sh
@@ -24,6 +18,8 @@ go get github.com/alpstable/csvpb@latest
 The type `structpb` types supported by this package are
 
 - [`ListValue`](https://pkg.go.dev/google.golang.org/protobuf/types/known/structpb#ListValue)
+
+See [here](https://github.com/alpstable/gidari#web-to-storage-examples) for examples.
 
 ## Contributing
 
