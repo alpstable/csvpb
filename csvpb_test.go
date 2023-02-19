@@ -305,6 +305,16 @@ func TestWrite(t *testing.T) {
 				{"1.000000", "test", "baz"},
 			},
 		},
+		{
+			name:       "array of objects",
+			decodeType: DecodeTypeJSON,
+			data:       []byte(`[{ "id": 1, "name": "test", "age": 42 }, { "id": 2, "name": "test2", "age": 43 }]`),
+			want: [][]string{
+				{"id", "name", "age"},
+				{"1.000000", "test", "42.000000"},
+				{"2.000000", "test2", "43.000000"},
+			},
+		},
 	} {
 		tcase := tcase
 
