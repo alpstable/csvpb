@@ -1,10 +1,12 @@
-// Copyright 2022 The CSVPB Authors.
+// Copyright 2023 The CSVPB Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//    http://www.apache.org/licenses/LICENSE-2.0
+
+// csvpb is a package for writing CSV files from a structpb.ListValue.
 package csvpb
 
 import (
@@ -43,10 +45,6 @@ func (col *column) currentRowNum() int {
 
 func (col *column) updateRowNum() {
 	col.root().rowNum++
-}
-
-func (col *column) addData(data string) {
-	col.data[col.currentRowNum()] = data
 }
 
 type columns struct {
@@ -148,7 +146,6 @@ func (cols *columns) addStruct(key string, obj *structpb.Struct) error {
 	// Add the parent column to the columns.
 	focus := cols
 	if key != "" {
-
 		// If the key is not empty, then that means that we are in a
 		// nested object. To deal with this case, we create a new object
 		// and add it to the columns.
