@@ -19,7 +19,7 @@ The type `structpb` types supported by this package are
 
 - [`ListValue`](https://pkg.go.dev/google.golang.org/protobuf/types/known/structpb#ListValue)
 
-See [here](https://github.com/alpstable/gidari#web-to-storage-examples) for examples.
+See the [gidari](https://github.com/alpstable/gidari) library to learn how to write CSV data from a web API.
 
 ## Contributing
 
