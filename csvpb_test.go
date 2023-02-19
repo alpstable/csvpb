@@ -1,10 +1,11 @@
-// Copyright 2022 The CSVPB Authors.
+// Copyright 2023 The CSVPB Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//    http://www.apache.org/licenses/LICENSE-2.0
+
 package csvpb
 
 import (
@@ -303,6 +304,16 @@ func TestWrite(t *testing.T) {
 			want: [][]string{
 				{"id", "name", "age.foo.bar"},
 				{"1.000000", "test", "baz"},
+			},
+		},
+		{
+			name:       "array of objects",
+			decodeType: DecodeTypeJSON,
+			data:       []byte(`[{ "id": 1, "name": "test", "age": 42 }, { "id": 2, "name": "test2", "age": 43 }]`),
+			want: [][]string{
+				{"id", "name", "age"},
+				{"1.000000", "test", "42.000000"},
+				{"2.000000", "test2", "43.000000"},
 			},
 		},
 	} {

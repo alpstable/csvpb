@@ -1,10 +1,12 @@
-// Copyright 2022 The CSVPB Authors.
+// Copyright 2023 The CSVPB Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//    http://www.apache.org/licenses/LICENSE-2.0
+
+// csvpb is a package for writing CSV files from a structpb.ListValue.
 package csvpb
 
 import (
@@ -43,10 +45,6 @@ func (col *column) currentRowNum() int {
 
 func (col *column) updateRowNum() {
 	col.root().rowNum++
-}
-
-func (col *column) addData(data string) {
-	col.data[col.currentRowNum()] = data
 }
 
 type columns struct {
@@ -124,7 +122,9 @@ func (cols *columns) addChildData(parent *column, key string, data string) {
 		cols.currentColNum++
 	}
 
-	cols.m[key].addData(data)
+	col := cols.m[key]
+
+	col.data[col.currentRowNum()] = data
 }
 
 func (cols *columns) addData(key string, data string) {
@@ -141,6 +141,9 @@ func (cols *columns) trimParents() {
 }
 
 func (cols *columns) addStruct(key string, obj *structpb.Struct) error {
+	cols.addColumn(key)
+
+	// Add the parent column to the columns.
 	focus := cols
 	if key != "" {
 		// If the key is not empty, then that means that we are in a
@@ -150,16 +153,13 @@ func (cols *columns) addStruct(key string, obj *structpb.Struct) error {
 	}
 
 	for fieldName, fieldValue := range obj.GetFields() {
-		err := focus.addValue(fieldName, fieldValue)
+		err := focus.addChildValue(focus.m[key], fieldName, fieldValue)
 		if err != nil {
 			return fmt.Errorf("failed to add struct value: %w", err)
 		}
 	}
 
 	if focus != cols {
-		// Add the parent column to the columns.
-		cols.addColumn(key)
-
 		for _, subColumn := range focus.m {
 			// If the subColumn has no data, then do nothing.
 			if len(subColumn.data) == 0 {
@@ -171,7 +171,10 @@ func (cols *columns) addStruct(key string, obj *structpb.Struct) error {
 			parent := cols.m[key]
 			cols.addChildData(parent, newFieldName, subColumn.data[0])
 		}
+	}
 
+	// If there is no column, there is nothing to update.
+	if cols.m[key] != nil {
 		cols.m[key].updateRowNum()
 	}
 
@@ -221,6 +224,27 @@ func (cols *columns) addList(key string, list *structpb.ListValue) error {
 	// the data to the column.
 	if buf.Len() >= minBufLen {
 		cols.addData(key, buf.String())
+	}
+
+	return nil
+}
+
+func (cols *columns) addChildValue(parent *column, key string, value *structpb.Value) error {
+	switch valType := value.Kind.(type) {
+	case *structpb.Value_NullValue:
+		cols.addChildData(parent, key, "")
+	case *structpb.Value_NumberValue:
+		cols.addChildData(parent, key, fmt.Sprintf("%f", valType.NumberValue))
+	case *structpb.Value_StringValue:
+		cols.addChildData(parent, key, valType.StringValue)
+	case *structpb.Value_BoolValue:
+		cols.addChildData(parent, key, fmt.Sprintf("%t", valType.BoolValue))
+	case *structpb.Value_StructValue:
+		return cols.addStruct(key, valType.StructValue)
+	case *structpb.Value_ListValue:
+		return cols.addList(key, valType.ListValue)
+	default:
+		return fmt.Errorf("%w: %T", ErrUnsupportedValueType, valType)
 	}
 
 	return nil
